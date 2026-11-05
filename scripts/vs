@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# vs — single entry point for the video-studio skill.
+# Reads ~/.video-studio/config.env (written by install.sh) and runs each
+# subcommand with the right Python venv, so callers never juggle interpreters.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VS_HOME="${VS_HOME:-$HOME/.video-studio}"
+CONFIG="$VS_HOME/config.env"
+# shellcheck disable=SC1090
+[ -f "$CONFIG" ] && source "$CONFIG"
+
+HF_VERSION="${VS_HYPERFRAMES_VERSION:-0.8.79}"
+SYS_PY="${VS_PY_SYSTEM:-python3}"
+
+need_py() { # need_py <var-name> <subcommand>
+  local val="${!1:-}"
+  if [ -z "$val" ] || [ ! -x "$val" ]; then
+    echo "✗ $2 needs $1 (not set or missing). Run: bash $HERE/install.sh" >&2
+    exit 2
+  fi
+  echo "$val"
+}
+
+usage() {
+  cat <<EOF
+vs — video production toolkit (video-studio skill)
+
+  vs doctor                         check machine: what is missing
+  vs selftest [--keep]              run the full pipeline on a tiny sample + assert results
+  vs tts <script.txt> -o <dir> [--engine vieneu|kokoro] [--voice NAME]
+  vs voices [--engine vieneu|kokoro] list voice names
+  vs transcribe <audio> -o words.json [--script script.txt] [--lang vi]
+  vs beats <music> -o beats.json
+  vs timeline --lines L --words W [--beats B] -o <dir>   → timeline.json/.js + captions.srt
+  vs sfx list|find <word>|synth     sound effects (free synth kit + your folders)
+  vs mix --voice V [--music M] [--cues C] -o mix.wav     duck + sfx + −14 LUFS
+  vs new <dir> [--portrait|--landscape]  copy the karaoke composition template
+  vs render <dir> [-o out.mp4] [--quality draft|looks|delivery]
+  vs deliver <video> <mix.wav> -o final.mp4              mux + loudness report
+  vs download <url> [-o file.mp4]   yt-dlp
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  doctor)     exec "$SYS_PY" "$HERE/doctor.py" "$@" ;;
+  selftest)   exec bash "$HERE/selftest.sh" "$@" ;;
+  tts|voices)
+    engine="vieneu"; args=("$@")
+    for ((i=0; i<${#args[@]}; i++)); do
+      [ "${args[$i]}" = "--engine" ] && engine="${args[$((i+1))]:-vieneu}"
+    done
+    if [ "$engine" = "kokoro" ]; then py="$(need_py VS_PY_EN "$cmd")"; else py="$(need_py VS_PY_VI "$cmd")"; fi
+    [ "$cmd" = "voices" ] && exec "$py" "$HERE/tts.py" --list-voices "$@"
+    exec "$py" "$HERE/tts.py" "$@" ;;
+  transcribe) py="$(need_py VS_PY_ASR transcribe)"; exec "$py" "$HERE/transcribe.py" "$@" ;;
+  beats)      py="$(need_py VS_PY_VI beats)"; exec "$py" "$HERE/beats.py" "$@" ;;
+  timeline)   exec "$SYS_PY" "$HERE/timeline.py" "$@" ;;
+  sfx)
+    if [ "${1:-}" = "synth" ]; then shift; py="$(need_py VS_PY_VI sfx)"; exec "$py" "$HERE/sfx-synth.py" "$@"; fi
+    exec "$SYS_PY" "$HERE/sfx.py" "$@" ;;
+  mix)        exec "$SYS_PY" "$HERE/mix.py" "$@" ;;
+  deliver)    exec "$SYS_PY" "$HERE/deliver.py" "$@" ;;
+  new)        exec bash "$HERE/new-composition.sh" "$@" ;;
+  render)     VS_HYPERFRAMES_VERSION="$HF_VERSION" exec bash "$HERE/render.sh" "$@" ;;
+  download)
+    ytdlp="${VS_YTDLP:-yt-dlp}"
+    url="${1:?usage: vs download <url> [-o file.mp4]}"; shift
+    out="%(title).80s.%(ext)s"; [ "${1:-}" = "-o" ] && out="$2"
+    exec "$ytdlp" -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "$out" "$url" ;;
+  help|-h|--help) usage ;;
+  *) echo "unknown command: $cmd" >&2; usage; exit 1 ;;
+esac

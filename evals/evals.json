@@ -1,0 +1,72 @@
+{
+  "skill_name": "video-studio",
+  "functional": {
+    "runner": "scripts/selftest.sh",
+    "note": "Runs the whole pipeline on a 2-line Vietnamese script + synthetic 120 BPM track and asserts measured outputs."
+  },
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Làm giúp mình một video TikTok 9:16 khoảng 20 giây giải thích vì sao ngủ trưa 20 phút giúp tập trung, giọng nữ miền Bắc, có nhạc nền và phụ đề karaoke.",
+      "expected_output": "final.mp4 1080x1920 with Vietnamese narration, karaoke captions, ducked music, −14 LUFS",
+      "assertions": [
+        "Runs `vs doctor` before producing",
+        "Writes script.txt and asks the user to approve it before voicing",
+        "Uses `vs tts` with a female Northern VieNeu voice (e.g. Trúc Ly, Mai Anh) found via `vs voices`",
+        "Runs `vs transcribe` with --script and --lines and reports the matched ratio",
+        "Builds timeline with `vs timeline` and uses `vs new --portrait`",
+        "Mixes with `vs mix --timeline` (music ducked, −14 LUFS target)",
+        "Delivers with `vs deliver` and reports the MEASURED LUFS and duration",
+        "Samples frames and states what was checked by eye"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I have voice.wav and a music track bed.mp3. Make the music duck under the voice, add a whoosh on each scene change and master it for YouTube.",
+      "expected_output": "mix.wav at −14 LUFS / −1.5 dBTP with sidechain ducking and whoosh cues timed ~0.15 s before cuts",
+      "assertions": [
+        "Uses `vs mix --voice voice.wav --music bed.mp3`",
+        "Derives cue times from timeline/scene cuts, not guessed seconds",
+        "Places whoosh slightly before each cut and at −12…−14 dB peak",
+        "Targets −14 LUFS and verifies with a measurement"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Cài giúp bạn mình bộ công cụ làm video này trên máy Mac của họ, rồi kiểm tra xem đủ chưa.",
+      "expected_output": "Clone + install.sh + vs doctor + vs selftest instructions, with sizes and Python 3.11 note",
+      "assertions": [
+        "Gives git clone into ~/.claude/skills/video-studio",
+        "Runs scripts/install.sh (not --reuse-reelcrew on a fresh machine)",
+        "Mentions first-run model downloads (~4 GB total) and Python 3.11/3.12 requirement",
+        "Verifies with `vs doctor` and `vs selftest`"
+      ]
+    }
+  ],
+  "trigger_queries": {
+    "should_trigger": [
+      "làm video ngắn 30 giây về thói quen đọc sách",
+      "lồng tiếng tiếng Việt cho đoạn kịch bản này",
+      "thêm phụ đề karaoke vào video",
+      "cắt cảnh theo nhịp nhạc cho teaser",
+      "chuẩn âm lượng -14 LUFS cho video YouTube",
+      "make a voiceover for my explainer script",
+      "duck the music under the narration",
+      "transcribe this audio with word timestamps for captions",
+      "render my HyperFrames composition with narration",
+      "cài công cụ làm video trên máy mới",
+      "tạo reel Instagram có nhạc nền và giọng đọc",
+      "dựng video giới thiệu app 15 giây"
+    ],
+    "should_not_trigger": [
+      "viết caption Facebook cho bài đăng",
+      "thiết kế logo cho app",
+      "sửa lỗi build Xcode",
+      "tóm tắt video YouTube này thành bài blog",
+      "lên kế hoạch content TikTok tháng 12",
+      "tạo ảnh thumbnail YouTube",
+      "deploy website lên Cloudflare Pages",
+      "phân tích số liệu quảng cáo Meta"
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<!--
+  video-studio starter composition (HyperFrames).
+  Reads window.TIMELINE (timeline.js from `vs timeline`) and builds, synchronously:
+    - one scene card per timeline scene, shown from scene.cut to scene.out
+    - karaoke captions: each word lights up on its spoken time
+    - a subtle pulse on every downbeat (only when beats were given)
+  Edit tokens in :root and the scene builder; keep timing reading from TIMELINE.
+  __WIDTH__ / __HEIGHT__ are replaced by `vs new`.
+-->
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-a: #0f1020; --bg-b: #2a1b4a; --ink: #f6f3ff; --dim: rgba(246, 243, 255, 0.45);
+      --accent: #c9ff3d; --card: rgba(255, 255, 255, 0.06);
+      --font: "Be Vietnam Pro", system-ui, sans-serif;
+      --scene-size: 84px; --cap-size: 64px;
+    }
+    html, body { margin: 0; background: var(--bg-a); }
+    #root { position: relative; overflow: hidden; font-family: var(--font); color: var(--ink);
+            background: radial-gradient(120% 90% at 50% 20%, var(--bg-b), var(--bg-a)); }
+    #pulse { position: absolute; inset: 0; background: radial-gradient(60% 40% at 50% 45%, rgba(201, 255, 61, 0.18), transparent 70%); opacity: 0; }
+    .scene { position: absolute; left: 8%; right: 8%; top: 22%; opacity: 0;
+             font-size: var(--scene-size); font-weight: 800; line-height: 1.12; letter-spacing: -0.02em; }
+    .scene .k { color: var(--accent); }
+    #captions { position: absolute; left: 7%; right: 7%; bottom: 24%; text-align: center; }
+    .cap { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0;
+           font-size: var(--cap-size); font-weight: 700; line-height: 1.2; }
+    .cap .w { color: var(--dim); display: inline-block; margin: 0 0.12em; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="root" data-start="0" data-duration="__DURATION__"
+       data-width="__WIDTH__" data-height="__HEIGHT__" style="width:__WIDTH__px;height:__HEIGHT__px">
+    <div id="pulse"></div>
+    <div id="scenes"></div>
+    <div id="captions"></div>
+    <audio id="mix" src="assets/mix.wav" data-start="0" data-duration="__DURATION__" data-track-index="1" data-volume="1"></audio>
+  </div>
+
+  <script src="timeline.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    // Build everything synchronously: the capture engine reads __timelines right after load.
+    const T = window.TIMELINE;
+    const tl = gsap.timeline({ paused: true });
+    const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+    // Scenes: text wraps via max-width (no <br>); *word* in the script → accent colour.
+    const scenesEl = document.getElementById("scenes");
+    T.scenes.forEach((s) => {
+      const el = document.createElement("div");
+      el.className = "scene";
+      el.innerHTML = esc(s.text).replace(/\*(.+?)\*/g, '<span class="k">$1</span>');
+      scenesEl.appendChild(el);
+      const inAt = s.cut ?? s.start, outAt = s.out ?? s.end;
+      tl.fromTo(el, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, inAt);
+      tl.to(el, { opacity: 0, y: -30, duration: 0.25, ease: "power2.in" }, Math.max(inAt + 0.4, outAt - 0.25));
+    });
+
+    // Karaoke captions: chunk visible start→end, each word brightens on its own time.
+    const capsEl = document.getElementById("captions");
+    T.captions.forEach((c) => {
+      const el = document.createElement("div");
+      el.className = "cap";
+      el.innerHTML = c.words.map((w) => `<span class="w">${esc(w.w.replace(/\*/g, ""))}</span>`).join("");
+      capsEl.appendChild(el);
+      tl.set(el, { opacity: 1 }, c.start);
+      tl.set(el, { opacity: 0 }, c.end + 0.12);
+      el.querySelectorAll(".w").forEach((span, i) => {
+        tl.to(span, { color: "#ffffff", scale: 1.08, duration: 0.08 }, c.words[i].start);
+        tl.to(span, { scale: 1, duration: 0.15 }, c.words[i].start + 0.08);
+      });
+    });
+
+    // Downbeat pulse (finite tweens only — never repeat: -1).
+    (T.beats.downbeats || []).forEach((b) => {
+      if (b > T.duration) return;
+      tl.to("#pulse", { opacity: 1, duration: 0.06 }, b);
+      tl.to("#pulse", { opacity: 0, duration: 0.45, ease: "power2.out" }, b + 0.06);
+    });
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines["root"] = tl;
+  </script>
+</body>
+</html>
