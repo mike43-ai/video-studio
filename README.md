@@ -6,7 +6,7 @@ Tất cả công cụ miễn phí, mã nguồn mở.
 
 ## Cài đặt
 ```bash
-git clone <repo-url> ~/.claude/skills/video-studio
+git clone https://github.com/mike43-ai/video-studio ~/.claude/skills/video-studio
 bash ~/.claude/skills/video-studio/scripts/install.sh     # ~4 GB tải về lần đầu
 ~/.claude/skills/video-studio/scripts/vs doctor            # kiểm tra máy
 ~/.claude/skills/video-studio/scripts/vs selftest          # chạy thử cả quy trình (~3 phút)

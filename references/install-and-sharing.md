@@ -26,7 +26,7 @@ Flags: `--skip-en`, `--skip-asr`, `--reuse-reelcrew` (no downloads; points confi
 ## Sharing with friends
 The skill folder is self-contained (no paid or proprietary code). Friend's steps:
 ```bash
-git clone <repo-url> ~/.claude/skills/video-studio
+git clone https://github.com/mike43-ai/video-studio ~/.claude/skills/video-studio
 bash ~/.claude/skills/video-studio/scripts/install.sh
 ~/.claude/skills/video-studio/scripts/vs doctor
 ```
