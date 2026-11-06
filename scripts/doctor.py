@@ -4,6 +4,8 @@
 Stdlib only, so it runs before anything is installed. Exit code 1 when a
 required capability is missing; optional ones only warn.
 """
+from __future__ import annotations
+
 import os
 import platform
 import shutil
@@ -81,6 +83,24 @@ def main() -> int:
     ytdlp = cfg.get("VS_YTDLP") or shutil.which("yt-dlp") or ""
     ok, d = run([ytdlp, "--version"]) if ytdlp else (False, "")
     check("Download (yt-dlp)", ok, d, f"bash {INSTALL}", False)
+
+    tools = cfg.get("VS_PY_TOOLS", "")
+    ok, d = (run([tools, "-c", "import numpy, scipy, PIL, soundfile; print('ok')"], timeout=120)
+             if tools and Path(tools).exists() else (False, "venv not configured"))
+    check("Tools venv (mix, compose, image)", ok, d, f"bash {INSTALL}")
+    for mod, label in (("cv2", "OpenCV (matte heads/reframe, redact)"), ("pypdfium2", "PDF pages (fetch)")):
+        ok, d = py_imports(tools, mod)
+        check(label, ok, d, f"bash {INSTALL}", False)
+    pptr = VS_HOME / "node" / "node_modules" / "puppeteer-core" / "package.json"
+    check("Web capture (puppeteer-core)", pptr.exists(), "ok" if pptr.exists() else "missing",
+          f"bash {INSTALL}", False)
+
+    keys_file = VS_HOME / "keys.env"
+    keys = {l.split("=", 1)[0] for l in keys_file.read_text().splitlines() if "=" in l} if keys_file.exists() else set()
+    for env, label in (("PIXABAY_API_KEY", "Pixabay key (free)"), ("GEMINI_API_KEY", "Gemini key (paid images)"),
+                       ("ELEVENLABS_API_KEY", "ElevenLabs key (paid voice/sfx/music)")):
+        has = env in keys or bool(os.environ.get(env))
+        check(label, has, "set" if has else "not set — optional", f"vs keys set {env.split('_')[0].lower()}", False)
 
     sfx_dirs = [p for p in cfg.get("VS_SFX_DIRS", str(VS_HOME / "sfx")).split(":") if p]
     n_sfx = sum(1 for d_ in sfx_dirs if Path(d_).exists()

@@ -22,23 +22,27 @@ need_py() { # need_py <var-name> <subcommand>
   echo "$val"
 }
 
+tools_py() { # numpy/scipy/PIL venv: the tools venv, else the main venv (it has numpy/scipy too)
+  if [ -n "${VS_PY_TOOLS:-}" ] && [ -x "$VS_PY_TOOLS" ]; then echo "$VS_PY_TOOLS"; else need_py VS_PY_VI "$1"; fi
+}
+
 usage() {
   cat <<EOF
-vs — video production toolkit (video-studio skill)
+vs — video production toolkit (video-studio skill).  vs <command> -h for details.
 
-  vs doctor                         check machine: what is missing
-  vs selftest [--keep]              run the full pipeline on a tiny sample + assert results
-  vs tts <script.txt> -o <dir> [--engine vieneu|kokoro] [--voice NAME]
-  vs voices [--engine vieneu|kokoro] list voice names
-  vs transcribe <audio> -o words.json [--script script.txt] [--lang vi]
-  vs beats <music> -o beats.json
-  vs timeline --lines L --words W [--beats B] -o <dir>   → timeline.json/.js + captions.srt
-  vs sfx list|find <word>|synth     sound effects (free synth kit + your folders)
-  vs mix --voice V [--music M] [--cues C] -o mix.wav     duck + sfx + −14 LUFS
-  vs new <dir> [--portrait|--landscape]  copy the karaoke composition template
-  vs render <dir> [-o out.mp4] [--quality draft|looks|delivery]
-  vs deliver <video> <mix.wav> -o final.mp4              mux + loudness report
-  vs download <url> [-o file.mp4]   yt-dlp
+ machine     doctor · selftest [--keep] · keys ls|set|rm|test · update [--check|--rollback] · report
+ voice       tts <script.txt> -o <dir> [--engine vieneu|kokoro|elevenlabs] [--voice N] [--takes 3]
+             voices [--engine …] · transcribe <audio> -o words.json [--script s.txt] [--terms "a,b"]
+ timing      beats <music> · timeline --lines L --words W [--beats B] -o <dir>
+ sources     fetch <url|file> [--want text,video,audio,pages,shot] · download <url>
+             commons search|get · pixabay search|get · osm find|area|query|route
+ make        image create|cut · music plan|make|analyze|arrange · sfx make|cc0|need|list|find
+ sound       mix [mix.json] [--voice V --music M --cues C] -o mix.wav [--stems DIR]
+ picture     new <dir> [--portrait|--landscape|--square] · render <dir> [--stills|--thumb|--pdf|--transparent]
+             compose edit.json · matte <file>|heads|reframe · redact scan|apply|verify|mark-clean|gate
+ finish      deliver <video> <mix.wav> -o final.mp4 [--lufs|--crf|--max-mb|--intro|--sheet]
+             inspect <file|folder> · check <video> [--script|--platform|--cues] · review stamp|require|status|animatic|receipt
+ library     library ls|get|path|sheet
 EOF
 }
 
@@ -50,6 +54,7 @@ case "$cmd" in
     engine="vieneu"; args=("$@")
     for ((i=0; i<${#args[@]}; i++)); do
       [ "${args[$i]}" = "--engine" ] && engine="${args[$((i+1))]:-vieneu}"
+      case "${args[$i]}" in --engine=*) engine="${args[$i]#--engine=}" ;; esac
     done
     if [ "$engine" = "kokoro" ]; then py="$(need_py VS_PY_EN "$cmd")"; else py="$(need_py VS_PY_VI "$cmd")"; fi
     [ "$cmd" = "voices" ] && exec "$py" "$HERE/tts.py" --list-voices "$@"
@@ -58,9 +63,10 @@ case "$cmd" in
   beats)      py="$(need_py VS_PY_VI beats)"; exec "$py" "$HERE/beats.py" "$@" ;;
   timeline)   exec "$SYS_PY" "$HERE/timeline.py" "$@" ;;
   sfx)
-    if [ "${1:-}" = "synth" ]; then shift; py="$(need_py VS_PY_VI sfx)"; exec "$py" "$HERE/sfx-synth.py" "$@"; fi
+    if [ "${1:-}" = "synth" ] || [ "${1:-}" = "defaults" ]; then shift; py="$(need_py VS_PY_VI sfx)"; exec "$py" "$HERE/sfx-synth.py" "$@"; fi
+    if [ "${1:-}" = "make" ]; then shift; py="$(need_py VS_PY_VI sfx)"; exec "$py" "$HERE/sfx_make.py" "$@"; fi
     exec "$SYS_PY" "$HERE/sfx.py" "$@" ;;
-  mix)        exec "$SYS_PY" "$HERE/mix.py" "$@" ;;
+  mix)        py="$(tools_py mix)"; exec "$py" "$HERE/mix.py" "$@" ;;
   deliver)    exec "$SYS_PY" "$HERE/deliver.py" "$@" ;;
   new)        exec bash "$HERE/new-composition.sh" "$@" ;;
   render)     VS_HYPERFRAMES_VERSION="$HF_VERSION" exec bash "$HERE/render.sh" "$@" ;;
@@ -69,6 +75,22 @@ case "$cmd" in
     url="${1:?usage: vs download <url> [-o file.mp4]}"; shift
     out="%(title).80s.%(ext)s"; [ "${1:-}" = "-o" ] && out="$2"
     exec "$ytdlp" -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "$out" "$url" ;;
+  inspect)    exec "$SYS_PY" "$HERE/inspect_media.py" "$@" ;;
+  check)      exec "$SYS_PY" "$HERE/check_video.py" "$@" ;;
+  review)     exec "$SYS_PY" "$HERE/review.py" "$@" ;;
+  keys)       exec "$SYS_PY" "$HERE/keys.py" "$@" ;;
+  library)    exec "$SYS_PY" "$HERE/library.py" "$@" ;;
+  fetch)      py="$(tools_py fetch)"; exec "$py" "$HERE/fetch.py" "$@" ;;
+  commons)    exec "$SYS_PY" "$HERE/commons.py" "$@" ;;
+  pixabay)    exec "$SYS_PY" "$HERE/pixabay.py" "$@" ;;
+  osm)        exec "$SYS_PY" "$HERE/osm.py" "$@" ;;
+  image)      py="$(tools_py image)"; exec "$py" "$HERE/image.py" "$@" ;;
+  music)      py="$(need_py VS_PY_VI music)"; exec "$py" "$HERE/music.py" "$@" ;;
+  compose)    py="$(tools_py compose)"; exec "$py" "$HERE/compose.py" "$@" ;;
+  matte)      py="$(need_py VS_PY_TOOLS matte)"; exec "$py" "$HERE/matte.py" "$@" ;;
+  redact)     py="$(need_py VS_PY_TOOLS redact)"; exec "$py" "$HERE/redact.py" "$@" ;;
+  update)     exec "$SYS_PY" "$HERE/update.py" "$@" ;;
+  report)     exec "$SYS_PY" "$HERE/report.py" "$@" ;;
   help|-h|--help) usage ;;
   *) echo "unknown command: $cmd" >&2; usage; exit 1 ;;
 esac

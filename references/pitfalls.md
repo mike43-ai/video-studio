@@ -30,3 +30,18 @@
 - `deliver` copies the video stream; if the render has odd dimensions/codec for a platform, re-encode:
   `ffmpeg -i final.mp4 -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a copy out.mp4`.
 - Report the measured LUFS/duration from `deliver`, not the target.
+
+## New tools
+- Intel Mac: `pip install opencv-python-headless numpy` picks an old numpy and COMPILES it (hangs for ages) →
+  install.sh uses `--only-binary :all:`. Do the same for any manual install.
+- `hyperframes snapshot` calls Gemini vision by itself when `GEMINI_API_KEY` is in the environment (paid) —
+  `vs render --stills/--thumb`, `vs review animatic`, `vs check --page` unset it. Call snapshot through `vs`.
+- Some ffmpeg builds (Homebrew 8.x here) have no `drawtext`/`subtitles` filter → `vs compose` draws subtitles
+  with Pillow instead; don't hand-write ffmpeg commands that rely on them.
+- `vs check` cue audibility is measured above 2.5 kHz: a deep boom under speech can show ⚠ while being fine —
+  listen before "fixing" it. Speech check reads digits as words differently ("tám" vs "8") → ⚠, not an error.
+- `vs music analyze` (librosa) may report half/double tempo and a drop one bar early on synth beds; the drop
+  time printed by `vs music make` is the true one.
+- `vs fetch` of YouTube: yt-dlp takes ~30 s to start on this machine; auto-subtitles are de-duplicated but
+  timing per word is spread evenly inside each cue (use Whisper on `audio.wav` for exact word times).
+- `vs redact` finds QR codes and faces only; numbers/names in text must be boxed by hand after looking.

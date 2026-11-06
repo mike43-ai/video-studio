@@ -1,6 +1,6 @@
 ---
 name: video-studio
-description: "Video production toolkit (sản xuất video) — offline Vietnamese + English narration (VieNeu-TTS, Kokoro), word timestamps corrected to the script (faster-whisper), beat/drop detection, one shared timeline.json, karaoke captions + SRT, music ducking, sound-effect cues, −14 LUFS master, HyperFrames render with resume, final mux + loudness check, machine install/doctor/selftest. Use whenever the user wants to make, voice, caption, mix, render or deliver a video, short, reel, TikTok, YouTube video, explainer, app promo or teaser; says 'làm video', 'dựng video', 'lồng tiếng', 'giọng đọc', 'phụ đề karaoke', 'cắt theo nhịp nhạc', 'chuẩn âm lượng', 'LUFS', 'ducking', 'voiceover', 'TTS', 'word timestamps'; or asks to install/check video tools. Also for any HyperFrames video needing narration, captions or an audio mix. Not for: thumbnails/images, social post captions (text), content calendars, or summarizing videos into text."
+description: "Video production toolkit (sản xuất video) — offline Vietnamese + English narration (VieNeu-TTS, Kokoro; ElevenLabs optional), best-of-N takes, word timestamps corrected to the script (faster-whisper), beat/drop detection, free synth music + drop arranging, sound effects from a description + CC0 search, one shared timeline.json, karaoke captions + SRT, mix.json audio mixing (beds, ducking, automation, stems, −14 LUFS), HyperFrames render (stills, thumbnails, alpha, PDF), ffmpeg editing of real footage (compose), person cutout + head-tracked 9:16 reframe, QR/face redaction, link/PDF/web ingest, Wikimedia Commons / Pixabay / OpenStreetMap sources, Gemini images, QA check (black/frozen frames, loudness, safe zones, speech vs script), review gates + animatic, delivery. Use whenever the user wants to make, voice, caption, mix, edit, render, check or deliver a video, short, reel, TikTok, YouTube video, explainer, app promo or teaser; says 'làm video', 'dựng video', 'lồng tiếng', 'giọng đọc', 'phụ đề karaoke', 'cắt theo nhịp nhạc', 'chuẩn âm lượng', 'LUFS', 'ducking', 'tách nền', 'che thông tin', 'kiểm tra video', 'voiceover', 'TTS', 'word timestamps'; or asks to install/check video tools. Also for any HyperFrames video needing narration, captions or an audio mix. Not for: social post captions (text), content calendars, or summarizing videos into text."
 ---
 
 # Video Studio
@@ -8,9 +8,10 @@ description: "Video production toolkit (sản xuất video) — offline Vietname
 One pipeline, one entry command (`vs`), one source of truth (`timeline.json`).
 Every visual and every sound reads the same timeline, so nothing drifts.
 
-**Scope.** Handles narration, transcription, beat analysis, timeline, captions, audio mix, render and delivery of
-videos the user is making. Does NOT handle: publishing/uploading to platforms, downloading content the user has no
-right to reuse, voice-cloning a real person without their consent, or paid APIs without asking first.
+**Scope.** Handles narration, transcription, beat analysis, timeline, captions, audio mix, sources, generated
+assets, footage editing, QA, render and delivery of videos the user is making. Does NOT handle: publishing/uploading
+to platforms, downloading content the user has no right to reuse, voice-cloning a real person without their consent,
+or paid APIs without asking first. No ready-made video styles — design each composition (see `hyperframes` skill).
 
 ## 0. Setup (once per machine)
 
@@ -65,8 +66,27 @@ Work in one project folder. Steps:
     stream lengths, LUFS, true peak. Sample 3 frames (`ffmpeg -ss T -frames:v 1`) and look at them.
     Report to the user what was checked by eye and the measured numbers.
 
+Before step 11 for anything shown to others: `$VS check final.mp4 --size … --script script.txt` (exit 1 = not
+ready; look at the `*-safezones.jpg` it writes). Optional gates: `$VS review animatic` after step 8 for a fast
+pacing check, `$VS review stamp <gate>` after each user OK.
+
 Music-only video (no voice): skip 2–3, write `lines.json` by hand (`[{"i":0,"text":"…","start":0,"end":2.5,"para":0}]`)
 or scenes from `beats.json` downbeats, then continue at 5.
+
+## 1b. Other jobs (details: `references/tools-reference.md`)
+
+| Need | Command |
+|---|---|
+| Material from a link, PDF, web page | `vs fetch <url\|file>` → `source/` (text, transcript, video, pages, screenshot) |
+| Photos / footage / maps | `vs commons`, `vs pixabay` (free key), `vs osm find\|area\|query\|route` — keep `credits.json` |
+| Picture from a prompt | `vs image create … --paid-ok` (ask first) · flat background off: `vs image cut` |
+| Music bed | `vs music make --length L --drop T --mood …` (free) · licensed track: `vs music arrange --drop-at T` |
+| Sound that is not in the kit | `vs sfx make "<description>"` · real recording: `vs sfx cc0 find …` |
+| Several beds, automation, stems | `vs mix mix.json` (schema in `scripts/mix.py`) |
+| Edit real footage / talking head | `vs compose edit.json`, `vs matte reframe` (16:9→9:16), `vs matte` (cutout) |
+| Hide QR codes / private data | `vs redact scan → apply → verify` → look → `mark-clean`; `gate` before using |
+| Stills, thumbnails, alpha layer, PDF | `vs render comp --stills … \| --thumb … \| --transparent \| --pdf …` |
+| Is it ready? | `vs inspect`, `vs check`, `vs review receipt` |
 
 ## 2. Rules
 
@@ -74,7 +94,10 @@ or scenes from `beats.json` downbeats, then continue at 5.
 - Change the script → re-run from step 2; the cache keeps it cheap. Never hand-edit times in timeline.json.
 - Fonts must cover Vietnamese (Be Vietnam Pro default). Check diacritics in the frame sample.
 - Report measured values (LUFS from `deliver`, real duration), never the requested ones.
-- Paid services (ElevenLabs, image APIs) only after the user agrees to the cost.
+- Paid services (ElevenLabs, Gemini images) only after the user agrees to the cost; then pass `--paid-ok`.
+  Never pass `--paid-ok` on your own. Same request again is free (library).
+- Credits: Commons CC BY/BY-SA and OSM need visible credit (end card or description) — read `credits.json`.
+- A clip from the user with customer data/QR codes: `vs redact` it and `vs redact gate` before it enters a build.
 
 ## 3. References
 
@@ -84,6 +107,7 @@ or scenes from `beats.json` downbeats, then continue at 5.
 | `references/audio-mixing-guide.md` | Levels, ducking, loudness targets per platform, fixing a bad mix |
 | `references/pitfalls.md` | Known traps: Whisper on Vietnamese, beat snap, Chrome stalls, CDN fonts, 8 GB RAM |
 | `references/install-and-sharing.md` | What install.sh does, sizes, manual install, Windows/Linux, sharing with friends |
+| `references/tools-reference.md` | Every command beyond the core pipeline: sources, generators, mix.json, compose, matte, redact, check, review |
 
 ## 4. Security
 

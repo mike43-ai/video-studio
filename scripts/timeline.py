@@ -15,6 +15,8 @@ break on punctuation or a pause > 0.35 s).
 Outputs in -o DIR: timeline.json · timeline.js (window.TIMELINE = …, loads from
 file:// without fetch) · captions.srt
 """
+from __future__ import annotations
+
 import argparse
 import json
 from pathlib import Path

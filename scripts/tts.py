@@ -12,11 +12,16 @@ Outputs in -o DIR:
                line of the script only re-synthesizes that line.
 
 Engines: vieneu (Vietnamese, offline, 48 kHz) · kokoro (English, offline, 24 kHz)
+         elevenlabs (PAID, any language incl. Vietnamese; needs `vs keys set elevenlabs` + --paid-ok)
+
+--takes N: voice every new line N times and keep the take Whisper understands best (fewest missing
+           words, then the most typical length). Fixes the odd mumbled/skipped word of neural voices.
 """
 import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,15 +58,50 @@ class Engine:
             self.tts = Kokoro(str(d / "kokoro-v1.0.int8.onnx"), str(d / "voices-v1.0.bin"))
             self.sr = 24000
             self.voice = voice or "af_heart"
+        elif name == "elevenlabs":
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from vslib import require_key
+            self.key = require_key("elevenlabs")
+            self.sr = 24000
+            self.model = os.environ.get("VS_ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+            self.voice = voice or "Rachel"
+            self.voice_id = self._voice_id(self.voice)
         else:
             sys.exit(f"unknown engine {name}")
+
+    def _api(self, path: str, body: dict | None = None) -> bytes:
+        from vslib import http
+        return http(f"https://api.elevenlabs.io/v1/{path}", data=json.dumps(body).encode() if body else None,
+                    headers={"xi-api-key": self.key, "Content-Type": "application/json"}, timeout=180)
+
+    def _voice_id(self, name: str) -> str:
+        if len(name) >= 20 and name.isalnum():
+            return name
+        voices = json.loads(self._api("voices")).get("voices", [])
+        hit = next((v for v in voices if v["name"].lower().startswith(name.lower())), None)
+        if not hit:
+            sys.exit(f"ElevenLabs voice {name!r} not found; vs voices --engine elevenlabs")
+        return hit["voice_id"]
 
     def voices(self) -> list[str]:
         if self.name == "vieneu":
             return [f"{vid}  ({label})" for label, vid in self.tts.list_preset_voices()]
+        if self.name == "elevenlabs":
+            return [f"{v['name']}  ({v['voice_id']}) {v.get('labels', {}).get('accent', '')}"
+                    for v in json.loads(self._api("voices")).get("voices", [])]
         return self.tts.get_voices()
 
-    def say(self, text: str) -> np.ndarray:
+    def say(self, text: str, take: int = 0) -> np.ndarray:
+        if self.name == "elevenlabs":
+            pcm = self._api(f"text-to-speech/{self.voice_id}?output_format=pcm_24000",  # 44.1k PCM needs a Pro plan
+                            {"text": text, "model_id": self.model,
+                             "voice_settings": {"stability": 0.5 - 0.1 * (take % 3), "similarity_boost": 0.75}})
+            return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
+        if self.name == "kokoro" and take:  # Kokoro is deterministic: vary the pace a little per take
+            wav, sr = self.tts.create(text, voice=self.voice, speed=self.speed * (1 + 0.04 * ((take + 1) // 2) * (-1) ** take),
+                                      lang=self.lang)
+            self.sr = sr
+            return np.asarray(wav, dtype=np.float32).reshape(-1)
         if self.name == "vieneu":
             wav = self.tts.infer(text, voice=self.tts.get_preset_voice(self.voice))
         else:
@@ -97,11 +137,58 @@ def parse_script(path: Path) -> list[tuple[str, int]]:
     return out
 
 
+def pick_takes(eng: "Engine", lines: list, cache_path, n: int, lang: str) -> None:
+    """Voice each uncached line n times, score all takes with one Whisper run, keep the best in the cache."""
+    todo, seen = [], set()
+    for text, _ in lines:  # each distinct uncached line once
+        cp = cache_path(text)
+        if not cp.exists() and cp not in seen:
+            seen.add(cp)
+            todo.append((text, cp))
+    if not todo:
+        return
+    takes_dir = todo[0][1].parent / "takes"
+    takes_dir.mkdir(exist_ok=True)
+    items = []
+    for text, cpath in todo:
+        for k in range(n):
+            tw = takes_dir / f"{cpath.stem}-{k}.wav"
+            if not tw.exists():
+                sf.write(tw, trim_silence(eng.say(text.replace("*", ""), take=k), eng.sr), eng.sr)
+            items.append({"wav": str(tw), "text": text, "cache": str(cpath), "k": k})
+        print(f"  takes ×{n}: {text[:60]}")
+    spec = takes_dir / "score.json"
+    spec.write_text(json.dumps([{"wav": i["wav"], "text": i["text"]} for i in items], ensure_ascii=False))
+    vs = Path(__file__).resolve().parent / "vs"
+    p = subprocess.run([str(vs), "transcribe", "--score-takes", str(spec), "--lang", lang], capture_output=True, text=True)
+    try:
+        scores = {s["wav"]: s for s in json.loads(p.stdout.strip().splitlines()[-1])}
+    except (ValueError, IndexError):
+        print(f"  ⚠ could not score takes (transcription unavailable) — keeping take 1\n{p.stderr[-300:]}")
+        scores = {}
+    for text, cpath in todo:
+        mine = [i for i in items if i["cache"] == str(cpath)]
+        durs = [sf.info(i["wav"]).duration for i in mine]
+        med = sorted(durs)[len(durs) // 2]
+
+        def rank(i_d):
+            i, d = i_d
+            s = scores.get(i["wav"], {"match": 0, "extra": 0})
+            return (-s["match"], s["extra"], abs(d - med))
+        best, _ = min(zip(mine, durs), key=rank)
+        b = scores.get(best["wav"], {})
+        wav, sr = sf.read(best["wav"], dtype="float32")
+        sf.write(cpath, wav, sr)
+        print(f"  ✓ kept take {best['k'] + 1}/{n} (heard {b.get('match', 0):.0%}): {text[:50]}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("script", nargs="?", type=Path)
     ap.add_argument("-o", "--out-dir", type=Path, default=Path("."))
-    ap.add_argument("--engine", default="vieneu", choices=["vieneu", "kokoro"])
+    ap.add_argument("--engine", default="vieneu", choices=["vieneu", "kokoro", "elevenlabs"])
+    ap.add_argument("--takes", type=int, default=1, help="voice each new line N times, keep the clearest")
+    ap.add_argument("--paid-ok", action="store_true", help="elevenlabs: the user agreed to the cost")
     ap.add_argument("--voice", help='vieneu: "Hải Đăng", "Mai Anh"… · kokoro: af_heart, am_michael…')
     ap.add_argument("--speed", type=float, default=1.0, help="kokoro only")
     ap.add_argument("--lang", default="en-us", help="kokoro only: en-us, en-gb")
@@ -110,6 +197,9 @@ def main() -> None:
     ap.add_argument("--list-voices", action="store_true")
     a = ap.parse_args()
 
+    if a.engine == "elevenlabs" and not a.list_voices and not a.paid_ok:
+        extra = f" --takes {a.takes} bills every line {a.takes}×." if a.takes > 1 else ""
+        sys.exit(f"✗ ElevenLabs is PAID (billed per character).{extra} Ask the user, then re-run with --paid-ok.")
     eng = Engine(a.engine, a.voice, a.speed, a.lang)
     if a.list_voices:
         print("\n".join(eng.voices()))
@@ -124,11 +214,18 @@ def main() -> None:
     cache = a.out_dir / ".tts-cache"
     cache.mkdir(exist_ok=True)
 
-    pieces, meta, t, prev_para = [], [], 0.0, None
-    for i, (text, para) in enumerate(lines):
+    def cache_path(text: str) -> Path:
         spoken = text.replace("*", "")
         key = hashlib.sha1(f"{a.engine}|{eng.voice}|{a.speed}|{a.lang}|{spoken}".encode()).hexdigest()[:16]
-        cpath = cache / f"{key}.wav"
+        return cache / f"{key}.wav"
+
+    if a.takes > 1:
+        pick_takes(eng, lines, cache_path, a.takes, "en" if a.engine == "kokoro" else
+                   ("vi" if a.engine == "vieneu" else os.environ.get("VS_TTS_LANG", "vi")))
+
+    pieces, meta, t, prev_para = [], [], 0.0, None
+    for i, (text, para) in enumerate(lines):
+        cpath = cache_path(text)
         if cpath.exists():
             wav, sr = sf.read(cpath, dtype="float32")
             eng.sr = sr

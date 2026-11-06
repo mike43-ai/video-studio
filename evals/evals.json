@@ -41,6 +41,29 @@
         "Mentions first-run model downloads (~4 GB total) and Python 3.11/3.12 requirement",
         "Verifies with `vs doctor` and `vs selftest`"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Mình có clip quay màn hình app ngân hàng có mã QR và số tài khoản, làm thành video dọc 9:16 có phụ đề, nhớ che thông tin.",
+      "expected_output": "redacted clip (QR auto, account number boxed by hand after looking), composed 9:16 with subtitles, checked",
+      "assertions": [
+        "Runs `vs redact scan` and reports what it found",
+        "Looks at frames (vs inspect sheet) and adds --box for account numbers",
+        "Runs `vs redact verify`, shows the user, then `mark-clean`; `vs redact gate` before using the file",
+        "Builds with `vs compose` (or HyperFrames) at 1080x1920",
+        "Runs `vs check` and reports measured values"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Tạo video 45 giây giới thiệu căn hộ gần hồ Hoàn Kiếm, có bản đồ quãng đi bộ tới hồ và nhạc nền tự tạo, drop nhạc đúng lúc hiện bản đồ.",
+      "expected_output": "OSM route + area data, synth bed whose drop is placed on the map scene, credits",
+      "assertions": [
+        "Uses `vs osm find/route` (walk) and reports km/minutes from the output",
+        "Uses `vs music make --drop` or `arrange --drop-at` with the map scene time from the timeline",
+        "Puts '© OpenStreetMap contributors' on screen",
+        "Does not call paid services without asking"
+      ]
     }
   ],
   "trigger_queries": {

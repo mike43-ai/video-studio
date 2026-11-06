@@ -54,6 +54,23 @@ def main() -> None:
         if len(drops) >= a.drops:
             break
 
+    # Refine each drop: the downbeat grid can be a beat off, so look ±0.6 bar around it for the frame where
+    # short-term loudness rises most (0.4 s after vs 0.4 s before), then snap to the nearest beat if close.
+    bar = 4 * 60 / tempo if tempo else 2.0
+    w = 0.4
+    refined = []
+    for d in drops:
+        cand = t_rms[(t_rms >= d - 0.6 * bar) & (t_rms <= d + 0.6 * bar)]
+        best, best_rise = d, -1.0
+        for t in cand:
+            b = rms[(t_rms >= t - w) & (t_rms < t)]
+            af = rms[(t_rms >= t) & (t_rms < t + w)]
+            if b.size and af.size and af.mean() - b.mean() > best_rise:
+                best, best_rise = float(t), float(af.mean() - b.mean())
+        near = beats[np.argmin(np.abs(beats - best))] if len(beats) else best
+        refined.append(float(near) if abs(near - best) < 0.08 else best)
+    drops = refined
+
     onsets = librosa.onset.onset_detect(onset_envelope=env, sr=sr, hop_length=hop, units="time")
     r = lambda xs: [round(float(x), 3) for x in xs]
     out = {"tempo": round(tempo, 2), "duration": round(dur, 3), "beats": r(beats),

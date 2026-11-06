@@ -12,7 +12,7 @@
 ## Levels before loudnorm
 - Voice is the reference (TTS peaks ≈ −1…−6 dBFS).
 - Music bed `--music-db -16` (default). Busy/loud track → −20; quiet ambient → −12.
-- Ducking `--duck 8` (ratio). Music still masks words → raise to 12–20. Pumping/obvious → lower to 4–6.
+- Ducking `--duck 9` (dB the music drops under the voice). Music still masks words → 12–15. Pumping/obvious → 5–6.
 - SFX peak_db: impacts −9…−12 · whoosh/riser −12…−14 · pop/click/tick −14…−20 · ding/chime −14…−16.
   Never louder than the voice; one cue per idea, not per word.
 
@@ -26,7 +26,7 @@
 | Symptom | Fix |
 |---|---|
 | Words hard to hear | `--duck 14` or `--music-db -20` |
-| Music vanishes under voice | `--duck 5` |
+| Music vanishes under voice | `--duck 5` (dB) |
 | Ending cut abruptly | `--fade 2.5`, or `vs timeline --tail 2` then re-mix |
 | deliver warns LUFS off | input had long silence → trim, or check `--duration` matches timeline |
 | A/V length differ | mix with `--timeline timeline.json` so both use the same duration |

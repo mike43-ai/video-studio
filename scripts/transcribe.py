@@ -6,6 +6,9 @@ words are aligned to the script's words (difflib) and the script's spelling
 wins; script words Whisper missed get times interpolated from neighbours.
 With --lines (from tts.py) every word gets the index of the line it falls in.
 
+--terms / --terms-file / --context bias Whisper toward names and jargon (hotwords + prompt); without
+--script, recognized words close to a term are respelled to it.
+
 Output: words.json  [{"w", "start", "end", "line"}]
 """
 import argparse
@@ -24,10 +27,26 @@ def norm(w: str) -> str:
     return PUNCT.sub("", unicodedata.normalize("NFC", w).lower())
 
 
-def recognize(audio: str, lang: str, model: str, compute: str) -> list[dict]:
-    from faster_whisper import WhisperModel
-    m = WhisperModel(model, device="cpu", compute_type=compute)
-    segs, info = m.transcribe(audio, language=lang, word_timestamps=True, vad_filter=True, beam_size=5)
+_MODEL = None
+
+
+def get_model(model: str, compute: str):
+    global _MODEL
+    if _MODEL is None:
+        from faster_whisper import WhisperModel
+        _MODEL = WhisperModel(model, device="cpu", compute_type=compute)
+    return _MODEL
+
+
+def recognize(audio: str, lang: str, model: str, compute: str, terms: list[str] | None = None,
+              context: str | None = None) -> list[dict]:
+    m = get_model(model, compute)
+    extra = {}
+    if terms:
+        extra["hotwords"] = " ".join(terms)
+    if context or terms:
+        extra["initial_prompt"] = " ".join(filter(None, [context, ", ".join(terms or [])]))[:800]
+    segs, info = m.transcribe(audio, language=lang, word_timestamps=True, vad_filter=True, beam_size=5, **extra)
     words = []
     for s in segs:
         for w in s.words or []:
@@ -35,6 +54,35 @@ def recognize(audio: str, lang: str, model: str, compute: str) -> list[dict]:
                 words.append({"w": w.word.strip(), "start": round(w.start, 3), "end": round(w.end, 3)})
     print(f"  whisper: {len(words)} words, language={info.language}", file=sys.stderr)
     return words
+
+
+def fix_terms(words: list[dict], terms: list[str]) -> int:
+    """Respell recognized words that are close to a known term (names, brands, jargon). Single-word terms only."""
+    singles = {norm(t): t for t in terms if len(t.split()) == 1 and len(norm(t)) >= 5}  # short terms: too risky
+    fixed = 0
+    for w in words:
+        n = norm(w["w"])
+        if not n or n in singles:
+            continue
+        best = [c for c in difflib.get_close_matches(n, list(singles), n=1, cutoff=0.85) if abs(len(c) - len(n)) <= 2]
+        if best:
+            tail = w["w"][len(w["w"].rstrip(".,!?;:")):]
+            w["w"] = singles[best[0]] + tail
+            fixed += 1
+    return fixed
+
+
+def score_takes(spec: Path, lang: str, model: str, compute: str) -> None:
+    """[{"wav", "text"}] → print JSON [{"wav", "match"}]: share of the text's words heard, in order."""
+    items = json.loads(spec.read_text(encoding="utf-8"))
+    out = []
+    for it in items:
+        heard = [norm(w["w"]) for w in recognize(it["wav"], lang, model, compute)]
+        want = [norm(w) for w in it["text"].replace("*", "").split() if norm(w)]
+        sm = difflib.SequenceMatcher(a=want, b=heard, autojunk=False)
+        hit = sum(b.size for b in sm.get_matching_blocks())
+        out.append({"wav": it["wav"], "match": round(hit / max(1, len(want)), 3), "extra": max(0, len(heard) - hit)})
+    print(json.dumps(out))
 
 
 def script_words(path: Path) -> list[str]:
@@ -89,16 +137,29 @@ def tag_lines(words: list[dict], lines: list[dict]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("audio")
+    ap.add_argument("audio", nargs="?")
     ap.add_argument("-o", "--out", type=Path, default=Path("words.json"))
     ap.add_argument("--lang", default="vi")
     ap.add_argument("--script", type=Path, help="script text: its spelling replaces Whisper's")
     ap.add_argument("--lines", type=Path, help="lines.json from tts.py → word.line")
     ap.add_argument("--model", default="large-v3-turbo", help="tiny|base|small|medium|large-v3|large-v3-turbo")
     ap.add_argument("--compute", default="int8")
+    ap.add_argument("--terms", help='comma list of names/terms to bias and respell, e.g. "Hải Đăng,TikTok,LUFS"')
+    ap.add_argument("--terms-file", type=Path, help="one term per line")
+    ap.add_argument("--context", help="a sentence about the topic (helps Whisper with jargon)")
+    ap.add_argument("--score-takes", type=Path, help="internal: JSON list of takes to score (used by vs tts --takes)")
     a = ap.parse_args()
 
-    words = recognize(a.audio, a.lang, a.model, a.compute)
+    if a.score_takes:
+        score_takes(a.score_takes, a.lang, a.model, a.compute)
+        return
+    terms = [t.strip() for t in (a.terms or "").split(",") if t.strip()]
+    if a.terms_file:
+        terms += [l.strip() for l in a.terms_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    words = recognize(a.audio, a.lang, a.model, a.compute, terms, a.context)
+    if terms and not a.script:
+        n = fix_terms(words, terms)
+        print(f"  respelled {n} word(s) to match --terms", file=sys.stderr)
     if a.script:
         words = align(words, script_words(a.script))
     if a.lines:

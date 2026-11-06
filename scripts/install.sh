@@ -7,8 +7,9 @@
 #   bash install.sh --skip-asr      skip transcription (faster-whisper)
 #
 # Creates Python 3.11/3.12 venvs (onnxruntime has no wheels for 3.13+ on some
-# platforms), downloads the Kokoro model, synthesizes a free SFX kit, and
-# writes ~/.video-studio/config.env. Safe to re-run: finished steps are skipped.
+# platforms), downloads the Kokoro model, synthesizes a free SFX kit, installs the
+# tools venv (OpenCV, PDF, imaging) and puppeteer-core, and writes
+# ~/.video-studio/config.env. Safe to re-run: finished steps are skipped.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +39,30 @@ write_config() { # key value — upsert a line in config.env
   mv "$CONFIG.tmp" "$CONFIG"
 }
 
+# ---------- tools venv (numpy/scipy/Pillow/OpenCV/PDF) + puppeteer-core: needed in both install modes ----------
+find_py() { # Python 3.11/3.12 for venvs (onnxruntime/opencv wheels)
+  for c in python3.11 python3.12 "$HOME/.local/bin/python3.11"; do
+    if command -v "$c" >/dev/null 2>&1; then command -v "$c"; return; fi
+  done
+  if command -v uv >/dev/null; then uv python install 3.11 >/dev/null && uv python find 3.11; fi
+}
+install_tools() {
+  local py; py="$(find_py)"
+  [ -n "$py" ] || { echo "✗ Need Python 3.11 or 3.12 (brew install python@3.11)"; exit 1; }
+  say "Tools venv (mix, compose, image cut, PDF, OpenCV) → venv 'tools'"
+  [ -x "$VENVS/tools/bin/python" ] || "$py" -m venv "$VENVS/tools"
+  "$VENVS/tools/bin/python" -m pip install -q --upgrade pip
+  # --only-binary: on Intel Macs pip otherwise tries to compile an older numpy for opencv (takes forever)
+  "$VENVS/tools/bin/python" -m pip install -q --only-binary :all: numpy scipy pillow soundfile pypdfium2 opencv-python-headless
+  write_config VS_PY_TOOLS "$VENVS/tools/bin/python"
+  if command -v npm >/dev/null; then
+    say "Web capture (puppeteer-core, uses your Chrome) → $VS_HOME/node"
+    mkdir -p "$VS_HOME/node"
+    [ -f "$VS_HOME/node/package.json" ] || echo '{"name":"vs-node","private":true}' > "$VS_HOME/node/package.json"
+    (cd "$VS_HOME/node" && npm i -s puppeteer-core@24) || echo "⚠ puppeteer-core install failed; vs fetch shots/PDF will be unavailable"
+  fi
+}
+
 # ---------- reuse an existing Reelcrew runtime (open-source venvs only) ----------
 if [ "$REUSE" = 1 ]; then
   RC="$HOME/.reelcrew"
@@ -51,6 +76,7 @@ if [ "$REUSE" = 1 ]; then
   done
   [ -d "$RC/runtime/sfx-freesound" ] && write_config VS_SFX_DIRS "$VS_HOME/sfx:$RC/runtime/sfx-freesound"
   write_config VS_PY_SYSTEM "$(command -v python3)"
+  install_tools
   say "Pointed config at Reelcrew runtime → $CONFIG"
   "$(grep VS_PY_VI "$CONFIG" | cut -d'"' -f2)" "$HERE/sfx-synth.py" --out "$VS_HOME/sfx/synth" || true
   python3 "$HERE/doctor.py"; exit 0
@@ -124,6 +150,8 @@ if [ "$SKIP_ASR" = 0 ]; then
   write_config VS_PY_ASR "$VENVS/asr/bin/python"
   echo "(Whisper large-v3-turbo downloads on the first 'vs transcribe', ~1.6 GB)"
 fi
+
+install_tools
 
 # ---------- HyperFrames + free SFX kit ----------
 say "Warming HyperFrames (npx cache)"
